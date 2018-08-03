@@ -19,3 +19,60 @@ class Translator {
         return this;
     }
 }
+
+async loadMetaData() {
+  //retrieve from helper class
+  const translationMetadata = await loader.lostHostedMetadata(this.urls.metadata);
+
+  this.maxDecoderSeqLength = translationMetadata['max_decoder_seq_length'];
+  this.maxEncoderSeqLength = translationMetadata['max_encoder_seq_length'];
+
+  this.inputTokenIndex = translationMetadata['input_token_index'];
+  this.targetTokenIndex = translationMetadata['target_token_index'];
+}
+
+prepareEncoderModel(model) {
+  //ecoder token count?
+  this.numEncoderTokens = model.input[0].shape[2];
+
+  const encoderInputs = model.input[0]
+
+  const stateH = model.layers[2].output[1];
+  const stateC = model.layers[2].output[2];
+
+  const encoderStates = [stateH, stateC];
+
+  this.encoderModel = tf.Model({ inputs: encoderInputs, outputs:encoderStates});
+}
+
+prepareDecoderModel(model) {
+  this.numDecoderTokens = model.input[1].shape[2];
+
+  const stateH = model.layers[2].output[1];
+
+  const latentDim = stateH.shape[stateH.shape.length - 1];
+
+  const decoderStateInputH = tf.input({shape: [latentDim], name: 'decoder_state_input_h'});
+  const decoderStateInputC = tf.input({shape: [latentDim], name: 'decoder_state_input_c'});
+  const decoderStateInputs = [decoderStateInputH, decoderStateInputC];
+
+  //retrieve the LSTM model
+  const decoderLSTM = model.layers[3];
+  const decoderInputs = decoderLSTM.input[0]
+
+  const applyOutputs = decoderLSTM.apply(decoderInputs, {initialState: decoderStateInputs});
+
+  let decoderOutputs = applyOutputs[0];
+
+  const decoderStateH = applyOutputs[1];
+  const decoderStateC = applyOutputs[2];
+  const decoderStates = [decoderStateH, decoderStateC];
+
+  const decoderDense = model.layers[4];
+  decoderOutputs = decoderDense.apply(decoderOutputs);
+
+  this.decoderModel = tf.model({
+    inputs:[decoderInputs].concat(decoder),
+    outputs:[decoderOutputs].concat(decoderState)
+  })
+}
